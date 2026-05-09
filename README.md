@@ -69,14 +69,41 @@ a_name   | total | result | pass
 
 ---
 
-### `hdc_template` — ดูโครงสร้างรายงาน
+### `hdc_template` — ดูเอกสาร Template รายงาน
 
-แสดง template ของรายงาน ได้แก่ ตัวกรอง (filters/parameters) หัวคอลัมน์ และข้อมูลตัวอย่าง
+ดึงข้อมูล template ของรายงาน ได้แก่ ชื่อรายงาน หมวดหมู่ ตัวกรองที่ใช้ได้ และค้นหาไฟล์ PDF template จาก `fileex.moph.go.th` ทุกปีงบประมาณที่มีข้อมูล
 
 | Parameter | Type | Default | คำอธิบาย |
 |-----------|------|---------|-----------|
-| `url` | string | — | URL ของหน้ารายงาน |
-| `include_sample_data` | boolean | `false` | `true` = ดึงข้อมูลตัวอย่าง 3 แถวแรกด้วย |
+| `report_code` | string | — | report_code (32 ตัว hex) หรือ URL รายงาน เช่น `https://hdc.moph.go.th/center/public/standard-report-detail/<code>` |
+
+**ตัวอย่าง**
+
+```
+hdc_template(report_code="cbd664002bac0b8f0ed57ccba8bfad19")
+```
+
+ผลลัพธ์:
+
+```
+=== Template รายงาน ===
+ชื่อรายงาน : จังหวัดที่มีบริการการแพทย์ทางไกลตามเกณฑ์ที่กำหนด
+หมวดหมู่   : การใช้บริการสาธารณสุข > การเข้าถึงบริการ
+ตารางข้อมูล: s_telemed
+
+--- ตัวกรองที่ใช้ได้ ---
+ปีงบประมาณ : 2569, 2568, 2567, 2566, 2565
+แสดงตาม   : zone (เขตสุขภาพ), province (จังหวัด)
+วันที่อัปเดตล่าสุด: 2026-04-16, 2026-03-16, 2026-02-16 (+25 เพิ่มเติม)
+
+--- ไฟล์ PDF Template (fileex.moph.go.th) ---
+พบ 1 ไฟล์:
+  ✓ ปี 2567: https://fileex.moph.go.th/media/cbd664002bac0b8f0ed57ccba8bfad19-2567.pdf
+ไม่มีไฟล์ (ปี 2569, ปี 2568, ปี 2566, ปี 2565)
+```
+
+> PDF template มี pattern: `https://fileex.moph.go.th/media/<report_code>-<year>.pdf`
+> tool จะ probe ทุกปีใน byear_list พร้อมกัน และรายงานเฉพาะปีที่มีไฟล์จริง
 
 ---
 

@@ -49,6 +49,8 @@ interface ReportInfo {
   byear_list?: number[];
   table_display?: Array<{ value: string; name: string }>;
   table_freeze?: string[];
+  source_table?: string;
+  seletype?: string;
 }
 
 function formatTable(rows: ApiRows[]): string {
@@ -355,152 +357,128 @@ server.tool(
 
 server.tool(
   "hdc_template",
-  "ดึง template และโครงสร้างของรายงาน HDC — แสดง filter/parameter ที่ใช้ได้, หัวตาราง, และคำอธิบายรายงาน",
+  "ดึง template เอกสารของรายงาน HDC — แสดงข้อมูลรายงาน ตัวกรองที่ใช้ได้ และค้นหาไฟล์ PDF template จาก fileex.moph.go.th",
   {
-    url: z.string().describe("URL ของหน้ารายงานที่ต้องการดู template"),
-    include_sample_data: z
-      .boolean()
-      .optional()
-      .default(false)
-      .describe("true = ดึงข้อมูลตัวอย่าง 3 แถวแรกด้วย"),
+    report_code: z
+      .string()
+      .describe("report_code (32 ตัว hex) หรือ URL รายงาน เช่น https://hdc.moph.go.th/center/public/standard-report-detail/<code>"),
   },
-  async ({ url, include_sample_data }) => {
-    let browser: Browser | undefined;
+  async ({ report_code }) => {
     try {
-      browser = await launchBrowser();
-      const page = await setupPage(browser);
-
-      await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-
-      try {
-        await page.waitForSelector("body", { timeout: 10000 });
-      } catch {
-        /* ignore */
+      const code = extractReportCode(report_code);
+      if (!code || code.length < 10) {
+        return {
+          content: [{ type: "text", text: `report_code ไม่ถูกต้อง: "${report_code}"` }],
+          isError: true,
+        };
       }
 
-      const template = await page.evaluate((includeSample: boolean) => {
-        // ดึง form inputs / filters
-        const forms = Array.from(document.querySelectorAll("form, select, input:not([type=hidden])"));
-        const filters: Array<{ label: string; type: string; options: string[] }> = [];
+      const infoUrl = `https://api-center-hdc.moph.go.th/v1/report-public/info?reportCode=${code}&subCatalogId=`;
+      const reportPageUrl = `${HDC_BASE_URL}/public/standard-report-detail/${code}`;
+      const fileexBase = `https://fileex.moph.go.th/media`;
 
-        document.querySelectorAll("select").forEach((select) => {
-          const label =
-            document.querySelector(`label[for="${select.id}"]`)?.textContent?.trim() ||
-            select.name ||
-            select.id ||
-            "ตัวกรอง";
-          const options = Array.from(select.options).map(
-            (o) => `${o.value}: ${o.text.trim()}`
-          ).slice(0, 20);
-          filters.push({ label, type: "select", options });
-        });
+      // ── Step 1: ดึง report info ──
+      const infoRes = await fetch(infoUrl, {
+        headers: { ...HDC_FETCH_HEADERS, Accept: "application/json" },
+        signal: AbortSignal.timeout(15000),
+      });
 
-        document.querySelectorAll("input[type='text'], input[type='date']").forEach((input) => {
-          const inp = input as HTMLInputElement;
-          const label =
-            document.querySelector(`label[for="${inp.id}"]`)?.textContent?.trim() ||
-            inp.placeholder ||
-            inp.name ||
-            "ช่องข้อมูล";
-          filters.push({ label, type: inp.type, options: [inp.placeholder || ""] });
-        });
-
-        // ดึงหัวตาราง
-        const tableHeaders: Array<{ tableIndex: number; headers: string[] }> = [];
-        document.querySelectorAll("table").forEach((table, idx) => {
-          const headers = Array.from(table.querySelectorAll("thead th, tr:first-child th"))
-            .map((th) => (th as HTMLElement).innerText.trim().replace(/\n/g, " "))
-            .filter((h) => h.length > 0);
-          if (headers.length > 0) {
-            tableHeaders.push({ tableIndex: idx, headers });
-          }
-        });
-
-        // ดึง breadcrumb / title
-        const breadcrumb = Array.from(
-          document.querySelectorAll(".breadcrumb li, nav li, .page-title, h1, h2, h3")
-        )
-          .map((el) => (el as HTMLElement).innerText.trim())
-          .filter((t) => t.length > 0 && t.length < 200)
-          .slice(0, 5);
-
-        // ดึง description
-        const description =
-          (document.querySelector(".report-description, .description, p.lead, .card-text") as HTMLElement | null)
-            ?.innerText?.trim() || "";
-
-        // Sample data (3 แถวแรก)
-        let sampleRows: string[] = [];
-        if (includeSample) {
-          const firstTable = document.querySelector("table");
-          if (firstTable) {
-            const rows = Array.from(firstTable.querySelectorAll("tbody tr")).slice(0, 3);
-            sampleRows = rows.map((row) =>
-              Array.from(row.querySelectorAll("td"))
-                .map((td) => (td as HTMLElement).innerText.trim())
-                .join(" | ")
-            );
-          }
-        }
-
+      if (!infoRes.ok) {
         return {
-          pageTitle: document.title,
-          breadcrumb,
-          description,
-          filters,
-          tableHeaders,
-          sampleRows,
-          tableCount: document.querySelectorAll("table").length,
-          formCount: forms.length,
+          content: [{ type: "text", text: `ดึง report info ไม่สำเร็จ HTTP ${infoRes.status}\nURL: ${infoUrl}` }],
+          isError: true,
         };
-      }, include_sample_data ?? false);
+      }
 
-      await browser.close();
+      const info = await infoRes.json() as InfoApiResponse;
+      if (!info.ok) {
+        return {
+          content: [{ type: "text", text: `API ตอบกลับ ok=false\nURL: ${infoUrl}` }],
+          isError: true,
+        };
+      }
 
+      const {
+        report_name,
+        category_main_name,
+        category_sub_name,
+        byear_list = [],
+        table_display = [],
+        source_table,
+        seletype,
+        table_freeze = [],
+      } = info.rows;
+
+      // ── Step 2: ค้นหา PDF templates จาก fileex.moph.go.th ──
+      // probe ทุกปีใน byear_list พร้อมกัน
+      const pdfChecks = await Promise.all(
+        byear_list.map(async (year) => {
+          const pdfUrl = `${fileexBase}/${code}-${year}.pdf`;
+          try {
+            const r = await fetch(pdfUrl, {
+              method: "GET",
+              signal: AbortSignal.timeout(8000),
+              headers: { "User-Agent": HDC_FETCH_HEADERS["User-Agent"] },
+            });
+            return { year, url: pdfUrl, available: r.ok, status: r.status };
+          } catch {
+            return { year, url: pdfUrl, available: false, status: 0 };
+          }
+        })
+      );
+
+      const availablePdfs = pdfChecks.filter((p) => p.available);
+      const unavailablePdfs = pdfChecks.filter((p) => !p.available);
+
+      // ── Step 3: format output ──
       const parts: string[] = [
         `=== Template รายงาน ===`,
-        `หัวข้อ: ${template.pageTitle}`,
+        `ชื่อรายงาน : ${report_name}`,
+        `หมวดหมู่   : ${[category_main_name, category_sub_name].filter(Boolean).join(" > ")}`,
+        `ตารางข้อมูล: ${source_table ?? "-"}`,
+        ``,
       ];
 
-      if (template.breadcrumb.length > 0) {
-        parts.push(`เส้นทาง: ${template.breadcrumb.join(" > ")}`);
+      // ตัวกรอง
+      parts.push(`--- ตัวกรองที่ใช้ได้ ---`);
+      parts.push(`ปีงบประมาณ : ${byear_list.join(", ")}`);
+      if (table_display.length > 0) {
+        parts.push(`แสดงตาม   : ${table_display.map((d) => `${d.value} (${d.name})`).join(", ")}`);
+      }
+      if (seletype) {
+        parts.push(`ประเภทพื้นที่: ${seletype}`);
       }
 
-      if (template.description) {
-        parts.push(`\nคำอธิบาย:\n${template.description}`);
+      // freeze dates (3 ล่าสุด)
+      if (table_freeze.length > 0) {
+        const recent = table_freeze.slice(0, 3);
+        parts.push(`วันที่อัปเดตล่าสุด: ${recent.join(", ")}${table_freeze.length > 3 ? ` (+${table_freeze.length - 3} เพิ่มเติม)` : ""}`);
       }
 
-      if (template.filters.length > 0) {
-        parts.push(`\n--- ตัวกรอง/Parameters (${template.filters.length} รายการ) ---`);
-        template.filters.forEach((f) => {
-          parts.push(`\n[${f.type}] ${f.label}`);
-          if (f.options.length > 0 && f.options[0]) {
-            const opts = f.options.slice(0, 10);
-            parts.push(`  ตัวเลือก: ${opts.join(", ")}${f.options.length > 10 ? ` ... (+${f.options.length - 10})` : ""}`);
-          }
+      parts.push(``);
+
+      // PDF templates
+      parts.push(`--- ไฟล์ PDF Template (fileex.moph.go.th) ---`);
+      if (availablePdfs.length > 0) {
+        parts.push(`พบ ${availablePdfs.length} ไฟล์:`);
+        availablePdfs.forEach((p) => {
+          parts.push(`  ✓ ปี ${p.year}: ${p.url}`);
         });
+      } else {
+        parts.push(`ไม่พบไฟล์ PDF template สำหรับรายงานนี้`);
       }
 
-      if (template.tableHeaders.length > 0) {
-        parts.push(`\n--- โครงสร้างตาราง (${template.tableCount} ตาราง) ---`);
-        template.tableHeaders.forEach((th) => {
-          parts.push(`\nตารางที่ ${th.tableIndex + 1} — คอลัมน์:`);
-          parts.push(`  ${th.headers.join(" | ")}`);
-        });
+      if (unavailablePdfs.length > 0) {
+        parts.push(`ไม่มีไฟล์ (${unavailablePdfs.map((p) => `ปี ${p.year}`).join(", ")})`);
       }
 
-      if ((include_sample_data ?? false) && template.sampleRows.length > 0) {
-        parts.push(`\n--- ข้อมูลตัวอย่าง (${template.sampleRows.length} แถว) ---`);
-        template.sampleRows.forEach((row, i) => {
-          parts.push(`แถว ${i + 1}: ${row}`);
-        });
-      }
-
-      parts.push(`\n--- URL ---\n${url}`);
+      parts.push(``);
+      parts.push(`--- ลิงก์ ---`);
+      parts.push(`รายงาน: ${reportPageUrl}`);
+      parts.push(`Info API: ${infoUrl}`);
 
       return { content: [{ type: "text", text: parts.join("\n") }] };
     } catch (error) {
-      if (browser) await browser.close();
       return {
         content: [{ type: "text", text: `เกิดข้อผิดพลาด: ${(error as Error).message}` }],
         isError: true,

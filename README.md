@@ -173,39 +173,6 @@ npm run build
 
 ---
 
-## สถาปัตยกรรม
-
-```
-Claude Desktop
-    │  MCP Protocol (stdio)
-    ▼
-hdc-mcp-server (Node.js)
-    ├── hdc_search  → fetch()  → api-hdc.moph.go.th/v1/center/reports
-    ├── hdc_get     → Puppeteer (Request Interception)
-    │                   └── hdc.moph.go.th/center/public/standard-report-detail/<code>
-    │                         └── intercept → api-hdc.moph.go.th/v1/reports/province/data/<code>
-    ├── hdc_template → Puppeteer → hdc.moph.go.th (any report URL)
-    ├── hdc_areas   → ข้อมูลคงที่ (13 เขตสุขภาพ / 77 จังหวัด)
-    └── hdc_page    → Puppeteer → hdc.moph.go.th (any page)
-```
-
-**เหตุผลที่ใช้ Request Interception ใน `hdc_get`**
-
-HDC ใช้ Angular SPA ที่ต้องการ session cookie และ DB connection sequence ที่ตั้งค่าผ่าน Angular's boot process — การ fetch ตรงจาก Node.js จะได้ `502 Connection "DBNEW_undefined" not found` Puppeteer ให้เราแทรก filter params เข้าใน Angular's own request โดยที่ cookies และ headers ยังคงถูกต้อง
-
----
-
-## Dependencies
-
-| Package | เวอร์ชัน | การใช้งาน |
-|---------|---------|-----------|
-| `@modelcontextprotocol/sdk` | ^1.29.0 | MCP Server framework |
-| `puppeteer` | ^24.43.0 | Browser automation + Request Interception |
-| `zod` | (via SDK) | Schema validation |
-| `typescript` | ^6.0.3 | Dev — type checking |
-
----
-
 ## License
 
 ISC

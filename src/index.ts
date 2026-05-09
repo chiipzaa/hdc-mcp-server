@@ -380,7 +380,7 @@ server.tool(
 
       const template = await page.evaluate((includeSample: boolean) => {
         // ดึง form inputs / filters
-        const forms = Array.from(document.querySelectorAll("form, select, input[type!=hidden]"));
+        const forms = Array.from(document.querySelectorAll("form, select, input:not([type=hidden])"));
         const filters: Array<{ label: string; type: string; options: string[] }> = [];
 
         document.querySelectorAll("select").forEach((select) => {
